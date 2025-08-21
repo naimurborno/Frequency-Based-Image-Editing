@@ -36,7 +36,7 @@ class PNP(nn.Module):
         print('Loading SD model')
 
         pipe = StableDiffusionPipeline.from_pretrained(model_key, torch_dtype=torch.float16).to("cuda")
-        pipe.enable_xformers_memory_efficient_attention()
+        # pipe.enable_xformers_memory_efficient_attention()
 
         self.vae = pipe.vae
         self.tokenizer = pipe.tokenizer
@@ -78,6 +78,50 @@ class PNP(nn.Module):
             img = self.vae.decode(latent).sample
             img = (img / 2 + 0.5).clamp(0, 1)
         return img
+    @torch.no_grad()
+    def fft2_latent(self, latent):
+        # latent: [B, C, H, W]
+        # Apply 2D FFT per channel
+        return torch.fft.fft2(latent, dim=(-2, -1))
+
+    @torch.no_grad()
+    def split_frequencies(self, fft_latent, ratio=1):
+        """
+        fft_latent: [B, C, H, W] (complex)
+        ratio: proportion of low-frequency radius
+        """
+        B, C, H, W = fft_latent.shape
+        crow, ccol = H // 2, W // 2
+        r = int(min(H, W) * ratio)  # radius for low-freq
+
+        mask = torch.zeros((H, W), device=fft_latent.device)
+        Y, X = torch.meshgrid(torch.arange(H, device=fft_latent.device),
+                              torch.arange(W, device=fft_latent.device),
+                              indexing="ij")
+        dist = torch.sqrt((X - ccol)**2 + (Y - crow)**2)
+        mask[dist <= r] = 1.0  # low-freq mask
+
+        mask = mask[None, None, :, :]  # broadcast
+        low_mask = mask
+        high_mask = 1.0 - mask
+
+        return low_mask, high_mask
+
+    @torch.no_grad()
+    def merge_frequency(self,source_latent, denoised_latent, ratio=0.25):
+        # Convert to frequency domain
+        fft_source = torch.fft.fftshift(torch.fft.fft2(source_latent, dim=(-2, -1)))
+        fft_denoised = torch.fft.fftshift(torch.fft.fft2(denoised_latent, dim=(-2, -1)))
+
+        # Build masks
+        low_mask, high_mask = self.split_frequencies(fft_source, ratio)
+
+        # Merge
+        fft_merged = fft_source * high_mask + fft_denoised * low_mask
+
+        # Convert back to spatial domain
+        merged = torch.fft.ifft2(torch.fft.ifftshift(fft_merged), dim=(-2, -1)).real
+        return merged
 
     @torch.autocast(device_type='cuda', dtype=torch.float32)
     def get_data(self):
@@ -110,7 +154,8 @@ class PNP(nn.Module):
 
         # compute the denoising step with the reference model
         denoised_latent = self.scheduler.step(noise_pred, t, x)['prev_sample']
-        return denoised_latent
+        merged_latent = self.merge_frequency(source_latents, denoised_latent, ratio=config['frequency_mask_ratio'])
+        return merged_latent
 
     def init_pnp(self, conv_injection_t, qk_injection_t):
         self.qk_injection_timesteps = self.scheduler.timesteps[:qk_injection_t] if qk_injection_t >= 0 else []
