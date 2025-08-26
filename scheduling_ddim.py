@@ -477,6 +477,8 @@ class DDIMScheduler(SchedulerMixin, ConfigMixin):
         variance = self._get_variance(timestep, prev_timestep)
         std_dev_t = eta * variance ** (0.5)
 
+        
+        #Exact place where the condition can be modified and an entropy based condition can be made
         if timestep<300:
           pred_original_sample=self.merge_frequency(source_latents, pred_original_sample, ratio=ratio)
 
