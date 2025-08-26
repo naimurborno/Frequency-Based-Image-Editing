@@ -9,7 +9,8 @@ from PIL import Image
 import yaml
 from tqdm import tqdm
 from transformers import logging
-from diffusers import DDIMScheduler, StableDiffusionPipeline
+from diffusers import StableDiffusionPipeline
+from scheduling_ddim import DDIMScheduler
 
 from pnp_utils import *
 
@@ -153,9 +154,9 @@ class PNP(nn.Module):
         noise_pred = noise_pred_uncond + self.config["guidance_scale"] * (noise_pred_cond - noise_pred_uncond)
 
         # compute the denoising step with the reference model
-        denoised_latent = self.scheduler.step(noise_pred, t, x)['prev_sample']
-        merged_latent = self.merge_frequency(source_latents, denoised_latent, ratio=config['frequency_mask_ratio'])
-        return merged_latent
+        denoised_latent = self.scheduler.step(noise_pred, t, x, source_latents,ratio=config['frequency_mask_ratio'])['prev_sample']
+        # merged_latent = self.merge_frequency(source_latents, denoised_latent, ratio=config['frequency_mask_ratio'])
+        return denoised_latent
 
     def init_pnp(self, conv_injection_t, qk_injection_t):
         self.qk_injection_timesteps = self.scheduler.timesteps[:qk_injection_t] if qk_injection_t >= 0 else []
