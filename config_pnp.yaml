@@ -1,7 +1,7 @@
 # general
 seed: 1
 device: 'cuda'
-output_path: 'PNP-results/horse'
+output_path: 'Results'
 attn_t: 0.5
 f_t: 0.8
 sd_version: '2.1'
