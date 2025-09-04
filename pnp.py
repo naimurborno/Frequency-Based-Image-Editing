@@ -17,7 +17,7 @@ from pnp_utils import *
 # suppress partial model loading warning
 logging.set_verbosity_error()
 
-class PNP(nn.Module):
+class Main_func(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
@@ -52,7 +52,7 @@ class PNP(nn.Module):
         self.image, self.eps = self.get_data()
 
         self.text_embeds = self.get_text_embeds(config["prompt"], config["negative_prompt"])
-        self.pnp_guidance_embeds = self.get_text_embeds("", "").chunk(2)[0]
+        self.guidance_embeds = self.get_text_embeds("", "").chunk(2)[0]
 
 
     @torch.no_grad()
@@ -85,44 +85,44 @@ class PNP(nn.Module):
         # Apply 2D FFT per channel
         return torch.fft.fft2(latent, dim=(-2, -1))
 
-    @torch.no_grad()
-    def split_frequencies(self, fft_latent, ratio=1):
-        """
-        fft_latent: [B, C, H, W] (complex)
-        ratio: proportion of low-frequency radius
-        """
-        B, C, H, W = fft_latent.shape
-        crow, ccol = H // 2, W // 2
-        r = int(min(H, W) * ratio)  # radius for low-freq
+    # @torch.no_grad()
+    # def split_frequencies(self, fft_latent, ratio=1):
+    #     """
+    #     fft_latent: [B, C, H, W] (complex)
+    #     ratio: proportion of low-frequency radius
+    #     """
+    #     B, C, H, W = fft_latent.shape
+    #     crow, ccol = H // 2, W // 2
+    #     r = int(min(H, W) * ratio)  # radius for low-freq
 
-        mask = torch.zeros((H, W), device=fft_latent.device)
-        Y, X = torch.meshgrid(torch.arange(H, device=fft_latent.device),
-                              torch.arange(W, device=fft_latent.device),
-                              indexing="ij")
-        dist = torch.sqrt((X - ccol)**2 + (Y - crow)**2)
-        mask[dist <= r] = 1.0  # low-freq mask
+    #     mask = torch.zeros((H, W), device=fft_latent.device)
+    #     Y, X = torch.meshgrid(torch.arange(H, device=fft_latent.device),
+    #                           torch.arange(W, device=fft_latent.device),
+    #                           indexing="ij")
+    #     dist = torch.sqrt((X - ccol)**2 + (Y - crow)**2)
+    #     mask[dist <= r] = 1.0  # low-freq mask
 
-        mask = mask[None, None, :, :]  # broadcast
-        low_mask = mask
-        high_mask = 1.0 - mask
+    #     mask = mask[None, None, :, :]  # broadcast
+    #     low_mask = mask
+    #     high_mask = 1.0 - mask
 
-        return low_mask, high_mask
+    #     return low_mask, high_mask
 
-    @torch.no_grad()
-    def merge_frequency(self,source_latent, denoised_latent, ratio=0.25):
-        # Convert to frequency domain
-        fft_source = torch.fft.fftshift(torch.fft.fft2(source_latent, dim=(-2, -1)))
-        fft_denoised = torch.fft.fftshift(torch.fft.fft2(denoised_latent, dim=(-2, -1)))
+    # @torch.no_grad()
+    # def merge_frequency(self,source_latent, denoised_latent, ratio=0.25):
+    #     # Convert to frequency domain
+    #     fft_source = torch.fft.fftshift(torch.fft.fft2(source_latent, dim=(-2, -1)))
+    #     fft_denoised = torch.fft.fftshift(torch.fft.fft2(denoised_latent, dim=(-2, -1)))
 
-        # Build masks
-        low_mask, high_mask = self.split_frequencies(fft_source, ratio)
+    #     # Build masks
+    #     low_mask, high_mask = self.split_frequencies(fft_source, ratio)
 
-        # Merge
-        fft_merged = fft_source * high_mask + fft_denoised * low_mask
+    #     # Merge
+    #     fft_merged = fft_source * high_mask + fft_denoised * low_mask
 
-        # Convert back to spatial domain
-        merged = torch.fft.ifft2(torch.fft.ifftshift(fft_merged), dim=(-2, -1)).real
-        return merged
+    #     # Convert back to spatial domain
+    #     merged = torch.fft.ifft2(torch.fft.ifftshift(fft_merged), dim=(-2, -1)).real
+    #     return merged
 
     @torch.autocast(device_type='cuda', dtype=torch.float32)
     def get_data(self):
@@ -144,7 +144,7 @@ class PNP(nn.Module):
         register_time(self, t.item())
 
         # compute text embeddings
-        text_embed_input = torch.cat([self.pnp_guidance_embeds, self.text_embeds], dim=0)
+        text_embed_input = torch.cat([self.guidance_embeds, self.text_embeds], dim=0)
 
         # apply the denoising network
         noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embed_input)['sample']
@@ -154,20 +154,20 @@ class PNP(nn.Module):
         noise_pred = noise_pred_uncond + self.config["guidance_scale"] * (noise_pred_cond - noise_pred_uncond)
 
         # compute the denoising step with the reference model
-        denoised_latent = self.scheduler.step(noise_pred, t, x, source_latents,ratio=config['frequency_mask_ratio'])['prev_sample']
+        denoised_latent = self.scheduler.step(noise_pred, t, x, source_latents)['prev_sample']
         # merged_latent = self.merge_frequency(source_latents, denoised_latent, ratio=config['frequency_mask_ratio'])
         return denoised_latent
 
-    def init_pnp(self, conv_injection_t, qk_injection_t):
+    def init_func(self, conv_injection_t, qk_injection_t):
         self.qk_injection_timesteps = self.scheduler.timesteps[:qk_injection_t] if qk_injection_t >= 0 else []
         self.conv_injection_timesteps = self.scheduler.timesteps[:conv_injection_t] if conv_injection_t >= 0 else []
         register_attention_control_efficient(self, self.qk_injection_timesteps)
         register_conv_control_efficient(self, self.conv_injection_timesteps)
 
-    def run_pnp(self):
-        pnp_f_t = int(self.config["n_timesteps"] * self.config["pnp_f_t"])
-        pnp_attn_t = int(self.config["n_timesteps"] * self.config["pnp_attn_t"])
-        self.init_pnp(conv_injection_t=pnp_f_t, qk_injection_t=pnp_attn_t)
+    def run_func(self):
+        f_t = int(self.config["n_timesteps"] * self.config["f_t"])
+        attn_t = int(self.config["n_timesteps"] * self.config["attn_t"])
+        self.init_func(conv_injection_t=f_t, qk_injection_t=attn_t)
         edited_img = self.sample_loop(self.eps)
 
     def sample_loop(self, x):
@@ -193,5 +193,5 @@ if __name__ == '__main__':
     
     seed_everything(config["seed"])
     print(config)
-    pnp = PNP(config)
-    pnp.run_pnp()
+    main_func = Main_func(config)
+    main_func.run_func()
