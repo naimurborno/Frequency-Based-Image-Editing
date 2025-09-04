@@ -2,20 +2,18 @@
 seed: 1
 device: 'cuda'
 output_path: 'PNP-results/horse'
-
-# data
-image_path: 'data/horse.jpg'
-latents_path: 'latents_forward'
-frequency_mask_ratio: 0.5
-
-# diffusion
+attn_t: 0.5
+f_t: 0.8
 sd_version: '2.1'
 guidance_scale: 7.5
-n_timesteps: 50
-prompt:  a polygonal illustration of a cat and a bunny
-negative_prompt: ugly, blurry, black, low res, unrealistic
 
-# pnp injection thresholds, ∈ [0, 1]
-pnp_attn_t: 0.5
-pnp_f_t: 0.8
+# data
+image_path: '/content/stones.jpg'     #input the path of your image
+latents_path: 'latents_forward'           #The main folder where latens are saved
+
+# Inference
+n_timesteps: 50
+prompt:  A woman standing
+negative_prompt: unrealistic
+
 
