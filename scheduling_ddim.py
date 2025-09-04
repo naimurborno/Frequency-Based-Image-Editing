@@ -273,11 +273,28 @@ class DDIMScheduler(SchedulerMixin, ConfigMixin):
         return low_mask, high_mask
 
     # @torch.no_grad()
-    def merge_frequency(self,source_latent, denoised_latent, ratio=0.25):
+    def merge_frequency(self,source_latent, denoised_latent, min_ratio=0.1, max_ratio=0.35):
         # Convert to frequency domain
         fft_source = torch.fft.fftshift(torch.fft.fft2(source_latent, dim=(-2, -1)))
         fft_denoised = torch.fft.fftshift(torch.fft.fft2(denoised_latent, dim=(-2, -1)))
 
+        # Compute energy
+        loc_energy=torch.abs(fft_source)**2
+        min_energy=loc_energy.mean()
+        max_energy=loc_energy.max()
+        energy=torch.sum(torch.abs(fft_source) ** 2, dim=(-2,-1), keepdim=True)
+        energy=torch.sum(energy)/len(energy)
+        normalized_energy=(energy-min_energy)/(max_energy-min_energy)
+        normalized_energy=normalized_energy
+
+        # Map energy to mask ratio
+        ratio=(max_ratio-min_ratio)*torch.abs(1-normalized_energy)
+        # ratio=torch.sum(ratio)/len(ratio)
+        
+        # print(ratio.mean())
+        # ratio=0.6
+        print(f" Min_energy:{min_energy}, Max_energy:{max_energy}, Total_energy:{energy}, Frequency ratio:{ratio}")
+        
         # Build masks
         low_mask, high_mask = self.split_frequencies(fft_source, ratio)
 
@@ -383,7 +400,6 @@ class DDIMScheduler(SchedulerMixin, ConfigMixin):
         timestep: int,
         sample: torch.Tensor,
         source_latents: torch.Tensor,
-        ratio:int,
         eta: float = 0.0,
         use_clipped_model_output: bool = False,
         generator=None,
@@ -479,8 +495,15 @@ class DDIMScheduler(SchedulerMixin, ConfigMixin):
 
         
         #Exact place where the condition can be modified and an entropy based condition can be made
-        if timestep<300:
-          pred_original_sample=self.merge_frequency(source_latents, pred_original_sample, ratio=ratio)
+        # latent_var=source_latents.var().item()
+        # entropy=0.5*np.log(2*np.pi*np.e*latent_var)
+        # print("entropy: ", entropy)
+        # print("timestep is:", timestep)
+
+        # if timestep<300:
+        pred_original_sample=self.merge_frequency(source_latents, pred_original_sample)
+
+        # pred_original_sample=self.merge_frequency(source_latents, pred_original_sample, ratio=ratio)
 
         if use_clipped_model_output:
             # the pred_epsilon is always re-derived from the clipped x_0 in Glide
