@@ -273,7 +273,7 @@ class DDIMScheduler(SchedulerMixin, ConfigMixin):
         return low_mask, high_mask
 
     # @torch.no_grad()
-    def merge_frequency(self,source_latent, denoised_latent, min_ratio=0.1, max_ratio=0.35):
+    def merge_frequency(self,source_latent, denoised_latent,attn_map, min_ratio=0.1, max_ratio=0.35):
         # Convert to frequency domain
         fft_source = torch.fft.fftshift(torch.fft.fft2(source_latent, dim=(-2, -1)))
         fft_denoised = torch.fft.fftshift(torch.fft.fft2(denoised_latent, dim=(-2, -1)))
@@ -293,13 +293,13 @@ class DDIMScheduler(SchedulerMixin, ConfigMixin):
         
         # print(ratio.mean())
         # ratio=0.6
-        print(f" Min_energy:{min_energy}, Max_energy:{max_energy}, Total_energy:{energy}, Frequency ratio:{ratio}")
+        # print(f" Min_energy:{min_energy}, Max_energy:{max_energy}, Total_energy:{energy}, Frequency ratio:{ratio}")
         
         # Build masks
         low_mask, high_mask = self.split_frequencies(fft_source, ratio)
-
+        final_mask=attn_map*high_mask
         # Merge
-        fft_merged = fft_source * high_mask + fft_denoised * low_mask
+        fft_merged = fft_source * final_mask + fft_denoised * (1-final_mask)
 
         # Convert back to spatial domain
         merged = torch.fft.ifft2(torch.fft.ifftshift(fft_merged), dim=(-2, -1)).real
@@ -400,6 +400,7 @@ class DDIMScheduler(SchedulerMixin, ConfigMixin):
         timestep: int,
         sample: torch.Tensor,
         source_latents: torch.Tensor,
+        attn_map:torch.Tensor,
         eta: float = 0.0,
         use_clipped_model_output: bool = False,
         generator=None,
@@ -501,7 +502,7 @@ class DDIMScheduler(SchedulerMixin, ConfigMixin):
         # print("timestep is:", timestep)
 
         # if timestep<300:
-        pred_original_sample=self.merge_frequency(source_latents, pred_original_sample)
+        pred_original_sample=self.merge_frequency(source_latents, pred_original_sample,attn_map)
 
         # pred_original_sample=self.merge_frequency(source_latents, pred_original_sample, ratio=ratio)
 

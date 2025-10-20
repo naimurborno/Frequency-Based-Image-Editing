@@ -13,6 +13,11 @@ from diffusers import StableDiffusionPipeline
 from scheduling_ddim import DDIMScheduler
 
 from pnp_utils import *
+from attention_map_diffusers import (
+    attn_maps,
+    init_pipeline,
+    get_attention_map_for_timestep
+)
 
 # suppress partial model loading warning
 logging.set_verbosity_error()
@@ -38,7 +43,7 @@ class Main_func(nn.Module):
 
         pipe = StableDiffusionPipeline.from_pretrained(model_key, torch_dtype=torch.float16).to("cuda")
         # pipe.enable_xformers_memory_efficient_attention()
-
+        pipe=init_pipeline(pipe)
         self.vae = pipe.vae
         self.tokenizer = pipe.tokenizer
         self.text_encoder = pipe.text_encoder
@@ -148,13 +153,15 @@ class Main_func(nn.Module):
 
         # apply the denoising network
         noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embed_input)['sample']
-
-        # perform guidance
+        attn_map = get_attention_map_for_timestep(attn_maps, timestep=int(t.item()), unconditional=True)
+        attn_map=attn_map.to(self.device)
+        # print(attn_map)
+        
         _, noise_pred_uncond, noise_pred_cond = noise_pred.chunk(3)
         noise_pred = noise_pred_uncond + self.config["guidance_scale"] * (noise_pred_cond - noise_pred_uncond)
 
         # compute the denoising step with the reference model
-        denoised_latent = self.scheduler.step(noise_pred, t, x, source_latents)['prev_sample']
+        denoised_latent = self.scheduler.step(noise_pred, t, x, source_latents,attn_map)['prev_sample']
         # merged_latent = self.merge_frequency(source_latents, denoised_latent, ratio=config['frequency_mask_ratio'])
         return denoised_latent
 

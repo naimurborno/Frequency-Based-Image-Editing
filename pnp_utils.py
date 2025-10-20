@@ -33,14 +33,14 @@ def load_source_latents_t(t, latents_path):
     return latents
 
 def register_attention_control_efficient(model, injection_schedule):
-    def sa_forward(self):
+    def sa_forward(self,**kwargs):
         to_out = self.to_out
         if type(to_out) is torch.nn.modules.container.ModuleList:
             to_out = self.to_out[0]
         else:
             to_out = self.to_out
 
-        def forward(x, encoder_hidden_states=None, attention_mask=None):
+        def forward(x, encoder_hidden_states=None, attention_mask=None,**kwargs):
             batch_size, sequence_length, dim = x.shape
             h = self.heads
 
